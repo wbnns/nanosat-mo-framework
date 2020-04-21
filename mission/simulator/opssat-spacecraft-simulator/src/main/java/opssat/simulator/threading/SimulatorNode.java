@@ -65,10 +65,6 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.zip.CRC32;
 import java.util.zip.Checksum;
-
-import org.orekit.bodies.GeodeticPoint;
-import org.orekit.errors.OrekitException;
-
 import opssat.simulator.GPS;
 import opssat.simulator.Orbit;
 import opssat.simulator.celestia.CelestiaData;
@@ -104,6 +100,8 @@ import opssat.simulator.util.SimulatorSpacecraftState;
 import opssat.simulator.util.SimulatorTimer;
 import org.hipparchus.geometry.euclidean.threed.Vector3D;
 import static org.hipparchus.util.FastMath.toDegrees;
+import org.orekit.bodies.GeodeticPoint;
+import org.orekit.errors.OrekitException;
 import org.orekit.propagation.analytical.tle.TLE;
 
 /**
@@ -228,7 +226,8 @@ public class SimulatorNode extends TaskNode
     return String.format("*%02X", (int) result);
   }
 
-  public static String handleResourcePath(String path, Logger logger, ClassLoader classLoader)
+  public static String handleResourcePath(String path, Logger logger, ClassLoader classLoader,
+      boolean replace)
   {
     String resourcesFolder = SimulatorNode.getResourcesPath();
     File folder = new File(resourcesFolder);
@@ -238,6 +237,11 @@ public class SimulatorNode extends TaskNode
     }
     String absolutePath = resourcesFolder + path;
     File f = new File(absolutePath);
+
+    if (replace && !f.isDirectory()) {
+      f.delete();
+    }
+
     if (f.exists() && !f.isDirectory()) {
       logger.log(Level.FINE, "File [" + f.getAbsolutePath() + "] exists");
     } else {
@@ -264,7 +268,7 @@ public class SimulatorNode extends TaskNode
           logger.log(Level.WARNING, e.toString());
         }
       } else {
-        logger.log(Level.INFO, "Resource file [" + path + "] could not be found");
+        logger.log(Level.WARNING, "Resource file [" + path + "] could not be found");
       }
     }
     return absolutePath;
@@ -293,6 +297,14 @@ public class SimulatorNode extends TaskNode
   {
     return this.orekitCore.getTLE();
 
+  }
+
+  public void runVectorTargetTracking(float x, float y, float z, float margin)
+  {
+    logger.log(Level.INFO, "Vector " + x + " " + y + " " + z);
+    if (simulatorHeader.isUseOrekitPropagator()) {
+      this.orekitCore.changeAttitudeVectorTarget(x, y, z, margin);
+    }
   }
 
   public enum DevDatPBind

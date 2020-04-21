@@ -231,9 +231,9 @@ public class OrekitCore
       throws OrekitException
   {
     this.logger = logger;
-    SimulatorNode.handleResourcePath("orekit-data.zip", logger, getClass().getClassLoader());
-    SimulatorNode.handleResourcePath("IGRF.zip", logger, getClass().getClassLoader());
-    SimulatorNode.handleResourcePath("WMM2020COF.zip", logger, getClass().getClassLoader());
+    SimulatorNode.handleResourcePath("orekit-data.zip", logger, getClass().getClassLoader(), true);
+    SimulatorNode.handleResourcePath("IGRF.zip", logger, getClass().getClassLoader(), true);
+    SimulatorNode.handleResourcePath("WMM2020COF.zip", logger, getClass().getClassLoader(), true);
 
     StringBuffer pathBuffer = new StringBuffer();
     appendIfExists(pathBuffer, "orekit-data.zip");
@@ -453,7 +453,7 @@ public class OrekitCore
     if (!simulatorHeader.isUpdateInternet()) {
       // Handle gps file from resources
       SimulatorNode.handleResourcePath(simulatorNode.getGPSOpsFile().getName(), logger,
-          getClass().getClassLoader());
+          getClass().getClassLoader(), false);
     } else {
       // First check if folder exists
       // Try to download latest NORAD TLEs
