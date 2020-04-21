@@ -38,17 +38,18 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-
+import opssat.simulator.threading.SimulatorNode;
+import opssat.simulator.util.SimulatorHeader;
+import org.hipparchus.geometry.euclidean.threed.Rotation;
+import org.hipparchus.geometry.euclidean.threed.RotationConvention;
+import org.hipparchus.geometry.euclidean.threed.RotationOrder;
 import org.hipparchus.geometry.euclidean.threed.Vector3D;
-/*import org.apache.commons.math3.geometry.euclidean.threed.Rotation;
-import org.apache.commons.math3.geometry.euclidean.threed.RotationConvention;
-import org.apache.commons.math3.geometry.euclidean.threed.RotationOrder;
-import org.apache.commons.math3.geometry.euclidean.threed.Vector3D;
-import org.apache.commons.math3.util.FastMath;*/
+import org.hipparchus.util.FastMath;
 import org.orekit.attitudes.Attitude;
 import org.orekit.attitudes.AttitudeProvider;
 import org.orekit.attitudes.AttitudesSequence;
 import org.orekit.attitudes.CelestialBodyPointed;
+import org.orekit.attitudes.InertialProvider;
 import org.orekit.attitudes.LofOffset;
 import org.orekit.attitudes.NadirPointing;
 import org.orekit.attitudes.SpinStabilized;
@@ -70,6 +71,7 @@ import org.orekit.models.earth.GeoMagneticField;
 import org.orekit.models.earth.GeoMagneticFieldFactory;
 import org.orekit.orbits.KeplerianOrbit;
 import org.orekit.orbits.Orbit;
+import org.orekit.orbits.OrbitType;
 import org.orekit.orbits.PositionAngle;
 import org.orekit.propagation.AbstractPropagator;
 import org.orekit.propagation.SpacecraftState;
@@ -83,14 +85,6 @@ import org.orekit.utils.AngularDerivativesFilter;
 import org.orekit.utils.Constants;
 import org.orekit.utils.IERSConventions;
 import org.orekit.utils.PVCoordinatesProvider;
-
-import opssat.simulator.threading.SimulatorNode;
-import opssat.simulator.util.SimulatorHeader;
-import org.hipparchus.geometry.euclidean.threed.Rotation;
-import org.hipparchus.geometry.euclidean.threed.RotationConvention;
-import org.hipparchus.geometry.euclidean.threed.RotationOrder;
-import org.hipparchus.util.FastMath;
-import org.orekit.orbits.OrbitType;
 
 /**
  *
@@ -156,6 +150,14 @@ public class OrekitCore
       {
         return 6;
       }
+    },
+    VECTOR_POINTING
+    {
+      @Override
+      public double getDoubleValue()
+      {
+        return 7;
+      }
     };
 
     public abstract double getDoubleValue();
@@ -192,9 +194,10 @@ public class OrekitCore
   AttitudeProvider dayObservationLaw;
   AttitudeProvider sunPointing;
   AttitudeProvider nadirPointing;
-  AttitudeProvider targetTracking;
-  AttitudeProvider lofTracking;
   AttitudeProvider bDotDetumble;
+  AttitudeProviderWrapper targetTracking;
+  AttitudeProviderWrapper lofTracking;
+  VectorPointingSimulator vectorPointing;
   SpinStabilized spinStabilized;
   GeodeticPoint targetGeo;
   AttitudesSequence attitudesSequence;
@@ -274,15 +277,20 @@ public class OrekitCore
     this.sun = CelestialBodyFactory.getSun();
     this.sunPointing = new CelestialBodyPointed(celestialFrame, sun,
         Vector3D.PLUS_I, Vector3D.MINUS_J, Vector3D.PLUS_K);
+
+    this.vectorPointing = new VectorPointingSimulator();
+
     this.nadirPointing = new NadirPointing(inertialFrame, earth);
     this.dayObservationLaw = new LofOffset(initialOrbit.getFrame(), LOFType.VVLH, RotationOrder.XYZ,
         FastMath.toRadians(20), FastMath.toRadians(40), 0);
     this.targetGeo = new GeodeticPoint(FastMath.toRadians(DARMSTADT_LATITUDE),
         FastMath.toRadians(DARMSTADT_LONGITUDE), 0);
-    this.targetTracking = new TargetPointing(inertialFrame, targetGeo, earth);
+    this.targetTracking = new AttitudeProviderWrapper(new TargetPointing(inertialFrame, targetGeo,
+        earth));
     this.attitudesSequence = new AttitudesSequence();
 
-    this.lofTracking = new LofOffset(initialOrbit.getFrame(), LOFType.LVLH);
+    this.lofTracking = new AttitudeProviderWrapper(
+        new LofOffset(initialOrbit.getFrame(), LOFType.LVLH));
     this.spinStabilized = new SpinStabilized(lofTracking, this.extrapDate, Vector3D.PLUS_I,
         FastMath.toRadians(0));
     this.bDotDetumble = new NadirPointing(inertialFrame, earth);
@@ -326,6 +334,7 @@ public class OrekitCore
     AttitudeDetector lofTargetSpinDetector = new AttitudeDetector(4);
     AttitudeDetector bDotDetumbleDetector = new AttitudeDetector(5);
     AttitudeDetector spinStabilizedDetector = new AttitudeDetector(6);
+    AttitudeDetector vectorPointingDetector = new AttitudeDetector(7);
 
     // Transitions to sunpointing
     attitudesSequence.addSwitchingCondition(nadirPointing, sunPointing, sunDetector, true, false,
@@ -337,6 +346,8 @@ public class OrekitCore
     attitudesSequence.addSwitchingCondition(bDotDetumble, sunPointing, sunDetector, true, false,
         60, AngularDerivativesFilter.USE_RRA, null);
     attitudesSequence.addSwitchingCondition(spinStabilized, sunPointing, sunDetector, true, false,
+        60, AngularDerivativesFilter.USE_RRA, null);
+    attitudesSequence.addSwitchingCondition(vectorPointing, sunPointing, sunDetector, true, false,
         60, AngularDerivativesFilter.USE_RRA, null);
 
     // Transitions to nadir
@@ -350,6 +361,9 @@ public class OrekitCore
     attitudesSequence.addSwitchingCondition(bDotDetumble, nadirPointing, nadirDetector, true, false,
         60, AngularDerivativesFilter.USE_RRA, null);
     attitudesSequence.addSwitchingCondition(spinStabilized, nadirPointing, nadirDetector, true,
+        false,
+        60, AngularDerivativesFilter.USE_RRA, null);
+    attitudesSequence.addSwitchingCondition(vectorPointing, nadirPointing, nadirDetector, true,
         false,
         60, AngularDerivativesFilter.USE_RRA, null);
 
@@ -369,6 +383,9 @@ public class OrekitCore
     attitudesSequence.addSwitchingCondition(spinStabilized, targetTracking, targetTrackingDetector,
         true, false,
         60, AngularDerivativesFilter.USE_RRA, null);
+    attitudesSequence.addSwitchingCondition(vectorPointing, targetTracking, targetTrackingDetector,
+        true, false,
+        60, AngularDerivativesFilter.USE_RRA, null);
 
     // Transitions to LOF tracking
     attitudesSequence.addSwitchingCondition(sunPointing, lofTracking, lofTargetDetector, true, false,
@@ -383,6 +400,9 @@ public class OrekitCore
         false,
         60, AngularDerivativesFilter.USE_RRA, null);
     attitudesSequence.addSwitchingCondition(spinStabilized, lofTracking, lofTargetDetector, true,
+        false,
+        60, AngularDerivativesFilter.USE_RRA, null);
+    attitudesSequence.addSwitchingCondition(vectorPointing, lofTracking, lofTargetDetector, true,
         false,
         60, AngularDerivativesFilter.USE_RRA, null);
 
@@ -402,6 +422,9 @@ public class OrekitCore
     attitudesSequence.addSwitchingCondition(spinStabilized, bDotDetumble, bDotDetumbleDetector, true,
         false,
         60, AngularDerivativesFilter.USE_RRA, null);
+    attitudesSequence.addSwitchingCondition(vectorPointing, bDotDetumble, bDotDetumbleDetector, true,
+        false,
+        60, AngularDerivativesFilter.USE_RRA, null);
 
     // Transitions to Spin stabilized
     attitudesSequence.addSwitchingCondition(sunPointing, spinStabilized, spinStabilizedDetector,
@@ -419,6 +442,31 @@ public class OrekitCore
     attitudesSequence.addSwitchingCondition(bDotDetumble, spinStabilized, spinStabilizedDetector,
         true, false,
         60, AngularDerivativesFilter.USE_RRA, null);
+    attitudesSequence.addSwitchingCondition(vectorPointing, spinStabilized, spinStabilizedDetector,
+        true, false,
+        60, AngularDerivativesFilter.USE_RRA, null);
+
+    // Transitions to Vector Pointing
+    // Transition time is 1 because VectorPointingSimulator is simulating the transition
+    attitudesSequence.addSwitchingCondition(sunPointing, vectorPointing, vectorPointingDetector,
+        true, false,
+        1, AngularDerivativesFilter.USE_RRA, null);
+    attitudesSequence.addSwitchingCondition(nadirPointing, vectorPointing, vectorPointingDetector,
+        true, false,
+        1, AngularDerivativesFilter.USE_RRA, null);
+    attitudesSequence.addSwitchingCondition(targetTracking, vectorPointing, vectorPointingDetector,
+        true, false,
+        1, AngularDerivativesFilter.USE_RRA, null);
+    attitudesSequence.addSwitchingCondition(lofTracking, vectorPointing, vectorPointingDetector,
+        true, false,
+        1, AngularDerivativesFilter.USE_RRA, null);
+    attitudesSequence.addSwitchingCondition(bDotDetumble, vectorPointing, vectorPointingDetector,
+        true, false,
+        1, AngularDerivativesFilter.USE_RRA, null);
+    attitudesSequence.addSwitchingCondition(spinStabilized, vectorPointing, vectorPointingDetector,
+        true, false,
+        1, AngularDerivativesFilter.USE_RRA, null);
+
 
     this.attitudesSequence.registerSwitchEvents(runningPropagator);
     this.attitudeState = new AttitudeStateProvider();
@@ -740,8 +788,8 @@ public class OrekitCore
     logger.log(Level.INFO,
         "changeAttitudeLof x [" + x + "] y [" + y + "] z [" + z + "] rate [" + rate + "]");
     try {
-      this.lofTracking = new LofOffset(this.inertialFrame, LOFType.LVLH, RotationOrder.XYZ, x_rad,
-          y_rad, z_rad);
+      this.lofTracking.setProvider(
+          new LofOffset(this.inertialFrame, LOFType.LVLH, RotationOrder.XYZ, x_rad, y_rad, z_rad));
       this.spinStabilized = new SpinStabilized(lofTracking, this.extrapDate, Vector3D.PLUS_K,
           FastMath.toRadians(rate));
       if (rate > 0) {
@@ -763,13 +811,36 @@ public class OrekitCore
     try {
       this.targetGeo = new GeodeticPoint(FastMath.toRadians(latitude),
           FastMath.toRadians(longitude), altitude);
-      this.targetTracking = new TargetPointing(this.inertialFrame, this.targetGeo, this.earth);
+      this.targetTracking.setProvider(new TargetPointing(this.inertialFrame, this.targetGeo,
+          this.earth));
     } catch (OrekitException ex) {
       Logger.getLogger(OrekitCore.class.getName()).log(Level.SEVERE, null, ex);
     }
     //attitudesSequence.resetActiveProvider(targetTracking);
     this.attitudeMode = ATTITUDE_MODE.TARGET_TRACKING;
 
+  }
+
+  public void changeAttitudeVectorTarget(float x, float y, float z, float margin)
+  {
+    this.vectorPointing.update(this.spacecraftState);
+    logger.log(Level.INFO, "changeAttitudeVectorTarget vector: [{0}, {1}, {2}] margin [{3}]",
+        new Object[]{x, y, z, margin});
+
+    // Rotation current =
+    //    this.spacecraftState.getAttitude().withReferenceFrame(FramesFactory.getICRF()).getRotation();
+
+    // camera is pointing in -z direction
+    //  Vector3D cameraVector = new Vector3D(0, 0, -1);
+
+    // Attitude at = new Attitude(this.spacecraftState.getDate(), FramesFactory.getICRF(),
+    //   new Rotation(cameraVector, new Vector3D(x, y, z)), Vector3D.ZERO, Vector3D.ZERO);
+    this.vectorPointing.start(x, y, z, margin);
+    //this.vectorPointing.setProvider(
+//        new InertialProvider(at.withReferenceFrame(FramesFactory.getEME2000()).getRotation()));
+
+    this.attitudeMode = ATTITUDE_MODE.VECTOR_POINTING;
+    // this.runningPropagator.setAttitudeProvider(vectorPointing);
   }
 
   public void changeAttitude(ATTITUDE_MODE newAttitude)
@@ -824,6 +895,12 @@ public class OrekitCore
      * Logger.getLogger(OrekitCore.class.getName()).log(Level.SEVERE, null, ex); }
      * return new Rotation(new double [3][3],0.0);
      */
+
+    //debug, todo remove!
+    logger.log(Level.INFO, this.spacecraftState.getAttitude().withReferenceFrame(
+        FramesFactory.getICRF()).getRotation().applyTo(
+        new Vector3D(0, 0, -1)).toString());
+
     return this.spacecraftState.getAttitude().getRotation();
   }
 
@@ -1176,8 +1253,12 @@ public class OrekitCore
         this.attitudeMode.equals(ATTITUDE_MODE.LOF_TARGET),
         this.attitudeMode.equals(ATTITUDE_MODE.LOF_TARGET_SPIN),
         this.attitudeMode.equals(ATTITUDE_MODE.BDOT_DETUMBLE),
-        this.attitudeMode.equals(ATTITUDE_MODE.SPIN_STABILIZED)
+        this.attitudeMode.equals(ATTITUDE_MODE.SPIN_STABILIZED),
+        this.attitudeMode.equals(ATTITUDE_MODE.VECTOR_POINTING)
       };
+      if (!this.attitudeMode.equals(ATTITUDE_MODE.VECTOR_POINTING)) {
+        this.vectorPointing.stop();
+      }
       this.attitudeState.setSwitched(active);
       this.spacecraftState = this.runningPropagator.propagate(extrapDate);
     }
@@ -1252,6 +1333,7 @@ public class OrekitCore
      * }.start(); }
      */
     this.isInitialized = true;
+
   }
 
   public Orbit getOrbit()
