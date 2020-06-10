@@ -10,7 +10,7 @@ import esa.mo.nmf.MonitorAndControlNMFAdapter;
 import esa.mo.nmf.nmfpackage.NMFPackagePMBackend;
 import esa.mo.platform.impl.util.PlatformServicesConsumer;
 import esa.mo.platform.impl.util.PlatformServicesProviderInterface;
-import esa.mo.platform.impl.util.PlatformServicesProviderSoftSim;
+//import esa.mo.platform.impl.util.PlatformServicesProviderSoftSim;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.ccsds.moims.mo.mal.MALException;
@@ -36,12 +36,9 @@ public class NanosatMOSupervisorBasicImpl extends NanoSatMOSupervisor {
       } catch (NullPointerException | ClassNotFoundException | InstantiationException
           | IllegalAccessException ex) {
         // If the property for the platform implementation is not provided, an NPE will occur.
-        // In this case or any other problem with reflection default to the simulated platforms
         Logger.getLogger(NanosatMOSupervisorBasicImpl.class.getName()).log(Level.SEVERE,
-            "Something went wrong when initializing the platform services. Using simulated services.",
+            "Something went wrong when initializing the platform services!",
             ex);
-        platformServices
-            = new PlatformServicesProviderSoftSim();
       }
       platformServices.init(comServices);
     } catch (MALException ex) {
